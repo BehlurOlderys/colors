@@ -139,7 +139,6 @@ class Application:
 
         [R, G, B] = normalize_with_0min([r_px, g_px, b_px], 1)
 
-        print(f"Integrated color RGB: ({R},{G},{B})")
         return R, G, B
 
     def plot_spectrum_values(self, val, name, color):
@@ -186,8 +185,10 @@ class Application:
     def perform_command_line(self, action):
         if action == "save_star":
             self.get_responses(self.used_config)
-            self.plot_star(self.get_rgb_color(self.used_config))
+            rgb_color = self.get_rgb_color(self.used_config)
+            self.plot_star(rgb_color)
             self.fig.savefig(self.used_config["star_output_file"])
+            print(rgb_color)
         elif action == "save_responses":
             self.get_responses(self.used_config)
             self.plot_responses(self.used_config)
@@ -272,13 +273,22 @@ if __name__=="__main__":
     parser.add_argument('--red_coefficient', default=default_config["red_x"], type=float)
     parser.add_argument('--green_coefficient', default=default_config["green_x"], type=float)
     parser.add_argument('--blue_coefficient', default=default_config["blue_x"], type=float)
-    parser.add_argument('--star_type', '-s', default=default_config["star_type"], choices=available_templates)
+    parser.add_argument('--star_type', '-s', default=default_config["star_type"])
     parser.add_argument('--action', '-a', choices=available_actions, default="gui")
     parser.add_argument('--star_output_file', default="star.png")
+    parser.add_argument('--list_star_types', '-l', action='store_true')
     parser.add_argument('--responses_output_file', default="responses.png")
 
     args = parser.parse_args()
-    print(args.camera)
+
+    if args.list_star_types:
+        for t in available_templates:
+            print(t)
+        exit(0)
+
+    used_star_type = args.star_type.replace('\r', '').replace('\n', '').strip()
+    if args.star_output_file == "star.png" and not (used_star_type == default_config["star_type"]):
+        args.star_output_file = used_star_type + ".png"
 
     app = Application()
     app.used_config["camera"] = args.camera
@@ -288,7 +298,7 @@ if __name__=="__main__":
     app.used_config["red_x"] = args.red_coefficient
     app.used_config["green_x"] = args.green_coefficient
     app.used_config["blue_x"] = args.blue_coefficient
-    app.used_config["star_type"] = args.star_type
+    app.used_config["star_type"] = used_star_type
     app.used_config["star_output_file"] = args.star_output_file
     app.used_config["responses_output_file"] = args.responses_output_file
     app.run(args.action)
