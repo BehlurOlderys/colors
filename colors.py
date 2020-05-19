@@ -7,7 +7,7 @@ import os
 import csv
 import PySimpleGUI as sg
 import glob
-from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.colors import ListedColormap
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib
 matplotlib.use('TkAgg')
@@ -28,7 +28,8 @@ default_config = {
     "green_x": "1.0",
     "filter_B": "zwo_new_B",
     "blue_x": "1.0",
-    "star_type": "G5_+0.0_Dwarf"
+    "star_type": "G5_+0.0_Dwarf",
+    "saturation": 1.0
 }
 
 
@@ -46,6 +47,31 @@ def normalize_with_0min(x, normal=1):
 
     temp_x = np.asarray(x+[0])
     return normal*(x - temp_x.min()) / (np.ptp(temp_x))
+
+
+def get_colors_map(color, saturation=1.0):
+    print("Using saturation = " + str(saturation))
+    max_res = 256.0
+    new_map = []
+    current = [0, 0, 0, 1.0]
+    increment_r = color[0] / max_res
+    increment_g = color[1] / max_res
+    increment_b = color[2] / max_res
+    print((increment_r, increment_g, increment_b))
+
+    final_value_white = [1.0, 1.0, 1.0, 1.0]
+    max_range = saturation / np.min(np.array([increment_r, increment_g, increment_b]))
+    print(max_range)
+
+    for i in range(0, int(max_range)):
+        new_map.append(current)
+        current = np.add(current, np.array([increment_r, increment_g, increment_b, 0.0]))
+        current = np.minimum(current, final_value_white)
+        result = np.max(current) == np.min(current)
+        if result:
+            break
+
+    return ListedColormap(new_map)
 
 
 def generate_camera_values(camera_file_name, range=Range()):
@@ -138,7 +164,7 @@ class Application:
         b_px = get_integrated_intensity(self.t, self.c, self.b)
 
         [R, G, B] = normalize_with_0min([r_px, g_px, b_px], 1)
-
+        print((R, G, B))
         return R, G, B
 
     def plot_spectrum_values(self, val, name, color):
@@ -162,14 +188,15 @@ class Application:
         self.plot_spectrum_values(self.t, config['star_type'], 'grey')
         self.ax_legend = self.ax.legend()
 
-    def plot_star(self, color):
+    def plot_star(self, color, config):
+        str_sat = config['saturation']
+        print(f"Config saturation = {str_sat}")
         x, y = np.meshgrid(np.linspace(-1, 1, 30), np.linspace(-1, 1, 30))
         d = np.sqrt(x * x + y * y)
         sigma, mu = 0.25, 0.0
         g = np.exp(-((d - mu) ** 2 / (2.0 * sigma ** 2)))
 
-        colors = ["black", color, "white"]
-        cmap1 = LinearSegmentedColormap.from_list("mycmap", colors)
+        cmap1 = get_colors_map(color, float(str_sat))
 
         if self.fig is None:
             self.fig = plt.figure(figsize=(5, 4), dpi=100)
@@ -186,7 +213,7 @@ class Application:
         if action == "save_star":
             self.get_responses(self.used_config)
             rgb_color = self.get_rgb_color(self.used_config)
-            self.plot_star(rgb_color)
+            self.plot_star(rgb_color, self.used_config)
             self.fig.savefig(self.used_config["star_output_file"])
             print(rgb_color)
         elif action == "save_responses":
@@ -227,7 +254,9 @@ class Application:
         ],
         [
             sg.Text('Select star type:'),
-            sg.Combo(available_templates, key='star_type', default_value=self.used_config['star_type'])
+            sg.Combo(available_templates, key='star_type', default_value=self.used_config['star_type']),
+            sg.Text('Saturation:'),
+            sg.Input(key='saturation', default_text='1.0', size=(10, ))
         ],
         [
             sg.Button('Check star color'), sg.Button('Plot responses')
@@ -251,7 +280,7 @@ class Application:
                 config = validate_config(values)
                 print('You entered ', config)
                 self.get_responses(config)
-                self.plot_star(self.get_rgb_color(config))
+                self.plot_star(self.get_rgb_color(config), config)
                 self.draw_figure(self.window['-CANVAS-'].TKCanvas)
 
             if event is 'Plot responses':
@@ -278,6 +307,7 @@ if __name__=="__main__":
     parser.add_argument('--star_output_file', default="star.png")
     parser.add_argument('--list_star_types', '-l', action='store_true')
     parser.add_argument('--responses_output_file', default="responses.png")
+    parser.add_argument('--saturation', default=default_config["saturation"], type=float)
 
     args = parser.parse_args()
 
@@ -301,4 +331,5 @@ if __name__=="__main__":
     app.used_config["star_type"] = used_star_type
     app.used_config["star_output_file"] = args.star_output_file
     app.used_config["responses_output_file"] = args.responses_output_file
+    app.used_config["saturation"] = args.saturation
     app.run(args.action)
