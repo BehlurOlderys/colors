@@ -17,12 +17,18 @@ used_max = 1
 available_actions = ["gui", "save_star", "save_responses"]
 available_cameras = ["asi120mm"]
 available_filters = [os.path.splitext(os.path.basename(f))[0] for f in glob.glob("filters/*.csv")]
+available_emission_dict = {
+    'H alpha': 6563, 'OIII': 4959, 'H beta': 4861, "SII": 6717
+}
+available_emission_lines = [k for k in available_emission_dict.keys()]
+
 
 available_templates = [os.path.splitext(os.path.basename(f))[0] for f in glob.glob("templates/*.fits")]
 
 default_config = {
     "camera": "asi120mm",
     "filter_R": "zwo_new_R",
+    "filter_L": "CLEAR",
     "red_x": "1.0",
     "filter_G": "zwo_new_G",
     "green_x": "1.0",
@@ -60,7 +66,8 @@ def get_colors_map(color, saturation=1.0):
     print((increment_r, increment_g, increment_b))
 
     final_value_white = [1.0, 1.0, 1.0, 1.0]
-    max_range = saturation / np.min(np.array([increment_r, increment_g, increment_b]))
+    minimal_color_inc = max(0.0001, np.min(np.array([increment_r, increment_g, increment_b])))
+    max_range = saturation / minimal_color_inc
     print(max_range)
 
     for i in range(0, int(max_range)):
@@ -108,10 +115,12 @@ def generate_template_values(name, range=Range()):
     return val
 
 
-def get_integrated_intensity(template_values, camera_values, filter_values, range=Range(), color='violet'):
-    final_curve_values = np.multiply(template_values, np.multiply(camera_values, filter_values))
-    plt.plot(range.xvals, final_curve_values, color='xkcd:'+color, label='final curve')
-    return integrate.cumtrapz(final_curve_values, range.xvals)[-1]
+def get_integrated_intensity(template_values, master_filter_values, filter_values, camera_values , range=Range(), color='violet'):
+    source_after_master = np.multiply(template_values, master_filter_values)
+    master_after_filters = np.multiply(source_after_master, filter_values)
+    final_on_camera = np.multiply(master_after_filters, camera_values)
+    plt.plot(range.xvals, final_on_camera, color='xkcd:'+color, label='final curve')
+    return integrate.cumtrapz(final_on_camera, range.xvals)[-1]
 
 
 def validate_config(values):
@@ -131,6 +140,7 @@ class Application:
         self.t = None
         self.g = None
         self.b = None
+        self.m = None
         self.span = Range()
         self.window = None
         self.fig = None
@@ -152,6 +162,7 @@ class Application:
         blue_x = float(config['blue_x'])
 
         self.c = generate_camera_values(config['camera'],     range=self.span)
+        self.m = generate_filter_values(config['filter_L'],   range=self.span)
         self.r = generate_filter_values(config['filter_R'],   range=self.span) * red_x
         self.g = generate_filter_values(config['filter_G'],   range=self.span) * green_x
         self.b = generate_filter_values(config['filter_B'],   range=self.span) * blue_x
@@ -159,9 +170,9 @@ class Application:
 
     def get_rgb_color(self, config):
         self.get_responses(config)
-        r_px = get_integrated_intensity(self.t, self.c, self.r)
-        g_px = get_integrated_intensity(self.t, self.c, self.g)
-        b_px = get_integrated_intensity(self.t, self.c, self.b)
+        r_px = get_integrated_intensity(self.t, self.m, self.r, self.c)
+        g_px = get_integrated_intensity(self.t, self.m, self.g, self.c)
+        b_px = get_integrated_intensity(self.t, self.m, self.b, self.c)
 
         [R, G, B] = normalize_with_0min([r_px, g_px, b_px], 1)
         print((R, G, B))
@@ -172,7 +183,7 @@ class Application:
 
     def plot_responses(self, config):
         if self.fig is None:
-            self.fig = plt.figure(figsize=(5, 4), dpi=100)
+            self.fig = plt.figure(figsize=(10, 8), dpi=100)
         if self.ax is None:
             self.ax = self.fig.add_axes([0, 0, 1, 1])
 
@@ -182,6 +193,7 @@ class Application:
 
         self.get_responses(config)
         self.plot_spectrum_values(self.c, config['camera'], 'black')
+        self.plot_spectrum_values(self.m, config['filter_L'], 'yellow')
         self.plot_spectrum_values(self.r, config['filter_R'], 'red')
         self.plot_spectrum_values(self.g, config['filter_G'], 'green')
         self.plot_spectrum_values(self.b, config['filter_B'], 'blue')
@@ -229,10 +241,56 @@ class Application:
             return
 
         sg.theme('DarkAmber')
+
+        star_tab_layout = [
+            [
+                sg.T('Plotting expected star color\n')
+            ],
+            [
+                sg.Text('Select star type:'),
+                sg.Combo(available_templates, key='star_type', default_value=self.used_config['star_type'])
+            ],
+            [
+                sg.Text('Saturation:'),
+                sg.Input(key='saturation', default_text='1.0', size=(10, ))
+            ],
+            [
+                sg.Button('Check star color')
+            ]
+        ]
+
+        emission_tab_layout = [
+            [
+                sg.T('Plotting expected emission lines color\n')
+            ],
+            [
+                sg.Text('Select emission lines:')
+            ],
+            [
+                sg.Combo(available_emission_lines, key='emission_line_1', default_value='H alpha'),sg.Text('Strength: '),
+                sg.Input(key='emission_line_1_strength', default_text='1.0', size=(10, ))
+            ],
+            [
+                sg.Combo(available_emission_lines, key='emission_line_2', default_value='OIII'),sg.Text('Strength: '),
+                sg.Input(key='emission_line_2_strength', default_text='1.0', size=(10, ))
+            ],
+            [
+                sg.Combo(available_emission_lines, key='emission_line_3', default_value='SII'),sg.Text('Strength: '),
+                sg.Input(key='emission_line_3_strength', default_text='1.0', size=(10, ))
+            ],
+            [
+                sg.Button('Check lines combined color')
+            ]
+        ]
+
         layout = [
         [
             sg.Text('Select camera:'),
             sg.Combo(available_cameras, key='camera', default_value=self.used_config['camera']),
+        ],
+        [
+            sg.Text('Select master filter (for all channels):'),
+            sg.Combo(available_filters, key='filter_L', default_value=self.used_config['filter_L']),
         ],
         [
             sg.Text('Select filter for R channel:'),
@@ -253,13 +311,17 @@ class Application:
             sg.Input(key='blue_x', default_text='1.0', size=(10, )),
         ],
         [
-            sg.Text('Select star type:'),
-            sg.Combo(available_templates, key='star_type', default_value=self.used_config['star_type']),
-            sg.Text('Saturation:'),
-            sg.Input(key='saturation', default_text='1.0', size=(10, ))
+            sg.TabGroup(
+                [
+                    [
+                        sg.Tab('Stars', star_tab_layout),
+                        sg.Tab('Emission lines', emission_tab_layout)
+                    ]
+                ]
+            )
         ],
         [
-            sg.Button('Check star color'), sg.Button('Plot responses')
+            sg.Button('Plot responses')
         ],
         [
             sg.Canvas(key='-CANVAS-')
@@ -281,6 +343,7 @@ class Application:
                 print('You entered ', config)
                 self.get_responses(config)
                 self.plot_star(self.get_rgb_color(config), config)
+                self.fig.savefig("_current_star_.png")
                 self.draw_figure(self.window['-CANVAS-'].TKCanvas)
 
             if event is 'Plot responses':
@@ -288,6 +351,7 @@ class Application:
                 self.get_responses(config)
                 self.window['-CANVAS-'].TKCanvas.delete("ALL")
                 self.plot_responses(config)
+                self.fig.savefig("_current_responses_.png")
                 self.draw_figure(self.window['-CANVAS-'].TKCanvas)
 
         self.window.close()
@@ -299,6 +363,7 @@ if __name__=="__main__":
     parser.add_argument('--filter_R', '-r', default=default_config["filter_R"], choices=available_filters)
     parser.add_argument('--filter_G', '-g', default=default_config["filter_G"], choices=available_filters)
     parser.add_argument('--filter_B', '-b', default=default_config["filter_B"], choices=available_filters)
+    parser.add_argument('--filter_master', '-m', default=default_config["filter_L"], choices=available_filters)
     parser.add_argument('--red_coefficient', default=default_config["red_x"], type=float)
     parser.add_argument('--green_coefficient', default=default_config["green_x"], type=float)
     parser.add_argument('--blue_coefficient', default=default_config["blue_x"], type=float)
